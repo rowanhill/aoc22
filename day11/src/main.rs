@@ -1,4 +1,4 @@
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap};
 
 #[derive(Clone)]
 enum WorryOp {
@@ -15,12 +15,12 @@ struct Monkey {
     inspections: u64,
 }
 
-fn calc_monkey_business(mut monkeys: Vec<Monkey>, rounds: usize, worry_reducer: impl Fn(u64) -> u64) -> u64 {
-    let mut passed_items: Vec<(usize, u64)> = vec![];
+fn calc_monkey_business(monkeys: &mut Vec<Monkey>, rounds: usize, worry_reducer: impl Fn(u64) -> u64) -> u64 {
     for _ in 0..rounds {
         for i in 0..monkeys.len() {
-            let monkey = &mut monkeys[i];
-            for mut worry in monkey.items.iter().copied() {
+            for j in 0..monkeys[i].items.len() {
+                let monkey = &mut monkeys[i];
+                let mut worry = monkey.items[j];
                 worry = match monkey.op {
                     WorryOp::Add(n) => worry + n,
                     WorryOp::Times(n) => worry *n,
@@ -32,15 +32,11 @@ fn calc_monkey_business(mut monkeys: Vec<Monkey>, rounds: usize, worry_reducer: 
                 } else {
                     monkey.test.2
                 };
-                passed_items.push((recipient, worry));
-            }
-            monkey.inspections += monkey.items.len() as u64;
-            monkey.items.clear();
 
-            for (j, worry) in &passed_items {
-                monkeys[*j].items.push(*worry);
+                monkeys[recipient].items.push(worry);
             }
-            passed_items.clear();
+            monkeys[i].inspections += monkeys[i].items.len() as u64;
+            monkeys[i].items.clear();
         }
     }
 
@@ -75,10 +71,10 @@ fn main() {
         lines.next();
     }
 
-    let monkey_business_1 = calc_monkey_business(monkeys.clone(), 20, |w| w / 3);
+    let monkey_business_1 = calc_monkey_business(&mut monkeys.clone(), 20, |w| w / 3);
     println!("Part 1: {}", monkey_business_1);
 
     let test_product: u64 = monkeys.iter().map(|m| m.test.0).product();
-    let monkey_business_2 = calc_monkey_business(monkeys, 10_000, |w| w % test_product);
+    let monkey_business_2 = calc_monkey_business(&mut monkeys, 10_000, |w| w % test_product);
     println!("Part 2: {}", monkey_business_2);
 }
