@@ -25,13 +25,11 @@ impl PartialOrd<Self> for GridCell {
     }
 }
 
-fn find_shortest_path(mut grid: Vec<Vec<GridCell>>, starts: Vec<(usize, usize)>, end: &(usize, usize)) -> i32 {
+fn calculate_shortest_paths(grid: &mut Vec<Vec<GridCell>>, start: &(usize, usize)) {
     let mut queue = BinaryHeap::new();
 
-    for start in starts {
-        grid[start.1][start.0].dist = 0;
-        queue.push(grid[start.1][start.0].clone());
-    }
+    grid[start.1][start.0].dist = 0;
+    queue.push(grid[start.1][start.0].clone());
 
     while let Some(cell) = queue.pop() {
         for (dx, dy) in [(-1i32, 0i32), (0, -1), (1, 0), (0, 1)] {
@@ -40,7 +38,7 @@ fn find_shortest_path(mut grid: Vec<Vec<GridCell>>, starts: Vec<(usize, usize)>,
 
             if newx >= 0 && (newx as usize) < grid[0].len() && newy >= 0 && (newy as usize) < grid.len() {
                 let neighbour = &mut grid[newy as usize][newx as usize];
-                if neighbour.height <= cell.height + 1 {
+                if neighbour.height + 1 >= cell.height {
                     if neighbour.dist == -1 || cell.dist + 1 < neighbour.dist {
                         neighbour.dist = cell.dist + 1;
                         queue.push(neighbour.clone());
@@ -49,9 +47,6 @@ fn find_shortest_path(mut grid: Vec<Vec<GridCell>>, starts: Vec<(usize, usize)>,
             }
         }
     }
-
-    let end_cell = &grid[end.1][end.0];
-    end_cell.dist
 }
 
 fn main() {
@@ -91,10 +86,17 @@ fn main() {
     }
     grid.push(row);
 
-    let part1 = find_shortest_path(grid.clone(), vec![start], &end);
+    // Find all shortest paths, starting from the end point and running backwards
+    calculate_shortest_paths(&mut grid, &end);
+    
+    let end_cell = &grid[start.1][start.0];
+    let part1 = end_cell.dist;
     println!("Part 1: {}", part1);
 
-    let part2 = find_shortest_path(grid.clone(), poss_starts, &end);
+    let part2 = poss_starts.into_iter()
+        .map(|(x, y)| grid[y][x].dist)
+        .filter(|d| d > &0)
+        .min().unwrap();
     println!("Part 2: {}", part2);
 
     println!("{:?}", inst.elapsed());
