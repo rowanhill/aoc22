@@ -25,11 +25,13 @@ impl PartialOrd<Self> for GridCell {
     }
 }
 
-fn find_shortest_path(mut grid: Vec<Vec<GridCell>>, start: &(usize, usize), end: &(usize, usize)) -> i32 {
-    grid[start.1][start.0].dist = 0;
-
+fn find_shortest_path(mut grid: Vec<Vec<GridCell>>, starts: Vec<(usize, usize)>, end: &(usize, usize)) -> i32 {
     let mut queue = BinaryHeap::new();
-    queue.push(grid[start.1][start.0].clone());
+
+    for start in starts {
+        grid[start.1][start.0].dist = 0;
+        queue.push(grid[start.1][start.0].clone());
+    }
 
     while let Some(cell) = queue.pop() {
         for (dx, dy) in [(-1i32, 0i32), (0, -1), (1, 0), (0, 1)] {
@@ -53,6 +55,7 @@ fn find_shortest_path(mut grid: Vec<Vec<GridCell>>, start: &(usize, usize), end:
 }
 
 fn main() {
+    let inst = std::time::Instant::now();
     let input = include_bytes!("../input.txt");
     let mut grid: Vec<Vec<GridCell>> = vec![];
     let mut row = vec![];
@@ -88,13 +91,11 @@ fn main() {
     }
     grid.push(row);
 
-    let part1 = find_shortest_path(grid.clone(), &start, &end);
+    let part1 = find_shortest_path(grid.clone(), vec![start], &end);
     println!("Part 1: {}", part1);
 
-    let part2 = poss_starts.into_iter()
-        .map(|start| find_shortest_path(grid.clone(), &start, &end))
-        .filter(|n| *n > 0)
-        .min()
-        .unwrap();
+    let part2 = find_shortest_path(grid.clone(), poss_starts, &end);
     println!("Part 2: {}", part2);
+
+    println!("{:?}", inst.elapsed());
 }
