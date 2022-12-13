@@ -1,67 +1,52 @@
-use std::cmp::Ordering;
+#![feature(array_chunks)]
 
-#[derive(Clone, Eq)]
+use std::cmp::Ordering;
+use std::iter::Peekable;
+
+#[derive(Clone, Eq, PartialEq)]
 enum PacketNode {
     Int(u8),
     List(Vec<PacketNode>)
 }
 
-fn parse_line(line: &str) -> PacketNode {
-    let mut stack = vec![];
-    let mut iter = line.as_bytes().iter().peekable();
-    while let Some(b) = iter.next() {
-        match b {
-            b'[' => stack.push(vec![]),
-            b']' => {
-                let node = PacketNode::List(stack.pop().unwrap());
-                if !stack.is_empty() {
-                    stack.last_mut().unwrap().push(node);
-                } else if iter.peek().is_none() {
-                    return node;
-                } else {
-                    panic!("Tried to pop empty stack");
-                }
-            },
-            b'0'..=b'9' => {
-                let mut num = b - b'0';
-                loop {
-                    match iter.peek() {
-                        None => break,
-                        Some(&peeked) => match peeked {
-                            b'0'..=b'9' => {
-                                num *= 10;
-                                let next = iter.next().unwrap();
-                                num += next;
-                            },
-                            _ => break
-                        }
-                    }
-                }
-                stack.last_mut().unwrap().push(PacketNode::Int(num));
-            },
-            b' ' | b',' => continue,
-            _ => unreachable!(),
-        }
+fn parse_packet(iter: &mut Peekable<impl Iterator<Item = u8>>) -> PacketNode {
+    match iter.peek() {
+        Some(b'[') => {
+            iter.next();
+            parse_packet_list(iter)
+        },
+        Some(_) => parse_packet_int(iter),
+        None => unreachable!(),
     }
-    for b in line.as_bytes() {
-        match b {
-            b'[' => stack.push(vec![]),
-            b']' => {
-                let node = PacketNode::List(stack.pop().unwrap());
-                stack.last_mut().unwrap().push(node);
-            },
-            b'0'..=b'9' => stack.last_mut().unwrap().push(PacketNode::Int(b - b'0')),
-            b' ' | b',' => continue,
-            _ => unreachable!(),
-        }
-    }
-    PacketNode::List(stack.pop().unwrap())
 }
 
-impl PartialEq<Self> for PacketNode {
-    fn eq(&self, other: &Self) -> bool {
-        self == other
+fn parse_packet_list(iter: &mut Peekable<impl Iterator<Item = u8>>) -> PacketNode {
+    use PacketNode::*;
+    let mut items = vec![];
+    loop {
+        match iter.peek() {
+            Some(b',') | Some(b' ') => { iter.next(); },
+            Some(b']') => break,
+            Some(_) => { items.push(parse_packet(iter)); },
+            None => unreachable!(),
+        }
     }
+    iter.next();
+    List(items)
+}
+
+fn parse_packet_int(iter: &mut Peekable<impl Iterator<Item = u8>>) -> PacketNode {
+    use PacketNode::*;
+    let mut num = 0;
+    loop {
+        let b = iter.next().unwrap();
+        num = num * 10 + (b - b'0');
+        match iter.peek() {
+            Some(b) if b >= &b'0' && b <= &b'9' => continue,
+            _ => break,
+        }
+    }
+    Int(num)
 }
 
 impl PartialOrd<Self> for PacketNode {
@@ -72,44 +57,40 @@ impl PartialOrd<Self> for PacketNode {
 
 impl Ord for PacketNode {
     fn cmp(&self, other: &Self) -> Ordering {
+        use PacketNode::*;
         match (self, other) {
-            (PacketNode::Int(l), PacketNode::Int(r)) => l.cmp(r),
-            (PacketNode::List(ls), PacketNode::List(rs)) => {
-                for (child_l, child_r) in ls.iter().zip(rs.iter()) {
-                    let child_ordering = child_l.cmp(child_r);
-                    if child_ordering != Ordering::Equal {
-                        return child_ordering;
-                    }
-                }
-                ls.len().cmp(&rs.len())
-            }
-            (PacketNode::List(_), PacketNode::Int(_)) => self.cmp(&PacketNode::List(vec![other.clone()])),
-            (PacketNode::Int(_), PacketNode::List(_)) => PacketNode::List(vec![self.clone()]).cmp(other),
+            (Int(l), Int(r)) => l.cmp(r),
+            (List(ls), List(rs)) => ls.cmp(rs),
+            (List(_), Int(_)) => self.cmp(&List(vec![other.clone()])),
+            (Int(_), List(_)) => List(vec![self.clone()]).cmp(other),
         }
     }
 }
 
-fn main() {
-    let input = include_str!("../input.txt");
-    let pairs: Vec<_> = input.split("\n\n")
-        .map(|s| {
-            let (left, right) = s.split_once("\n").unwrap();
-            (parse_line(left), parse_line(right))
-        })
-        .collect();
+fn parse_packets(bytes: &[u8]) -> Vec<PacketNode> {
+    let mut result = vec![];
+    let mut iter = bytes.iter().cloned().peekable();
+    loop {
+        match iter.peek() {
+            Some(b'\n') => { iter.next(); },
+            Some(_) => { result.push(parse_packet(&mut iter)); },
+            None => break,
+        }
+    }
+    result
+}
 
-    let part1 = pairs.iter().enumerate()
-        .filter_map(|(i, (left, right))| {
-            if left < right {
-                Some(i+1)
-            } else {
-                None
-            }
-        })
+fn main() {
+    let inst = std::time::Instant::now();
+    let input = include_bytes!("../input.txt");
+    let mut packets = parse_packets(input);
+
+    let part1 = packets.array_chunks()
+        .enumerate()
+        .filter(|(_, [left, right])| left < right)
+        .map(|(i, _)| i + 1)
         .sum::<usize>();
     println!("Part 1: {}", part1);
-
-    let mut packets: Vec<_> = pairs.iter().flat_map(|(left, right)| vec![left.clone(), right.clone()]).collect();
 
     let div1 = PacketNode::List(vec![PacketNode::List(vec![PacketNode::Int(2)])]);
     let div2 = PacketNode::List(vec![PacketNode::List(vec![PacketNode::Int(6)])]);
@@ -117,7 +98,9 @@ fn main() {
     packets.push(div2.clone());
     packets.sort();
 
-    let pos1 = packets.iter().position(|p| p.cmp(&div1) == Ordering::Equal).unwrap() + 1;
-    let pos2 = packets.iter().position(|p| p.cmp(&div2) == Ordering::Equal).unwrap() + 1;
+    let pos1 = packets.iter().position(|p| p == &div1).unwrap() + 1;
+    let pos2 = packets.iter().position(|p| p == &div2).unwrap() + 1;
     println!("Part 2: {}", pos1 * pos2);
+
+    println!("{:?}", inst.elapsed());
 }
