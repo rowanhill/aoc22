@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Instant;
 
 struct Valve {
     rate: usize,
@@ -89,7 +90,7 @@ fn max_released_pressure_duo(
     }
     cache.insert(cache_key, pressure_relieved);
 
-    let mut maxes = vec![pressure_relieved];
+    let mut max = pressure_relieved;
 
     // Only I move
     let my_move_max = usable_valve_indexes.iter()
@@ -117,7 +118,7 @@ fn max_released_pressure_duo(
         })
         .max();
     if let Some(m) = my_move_max {
-        maxes.push(m);
+        max = max.max(m);
     }
 
     // Only elephant moves
@@ -146,7 +147,7 @@ fn max_released_pressure_duo(
         })
         .max();
     if let Some(m) = el_move_max {
-        maxes.push(m);
+        max = max.max(m);
     }
 
     // Both move
@@ -188,9 +189,9 @@ fn max_released_pressure_duo(
         })
         .max();
     if let Some(m) = both_move_max {
-        maxes.push(m);
+        max = max.max(m);
     }
-    *maxes.iter().max().unwrap()
+    max
 }
 
 fn main() {
