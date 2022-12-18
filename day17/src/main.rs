@@ -40,65 +40,55 @@ const ROCK_ORDER: [RockShape; 5] = [RockShape::Horizontal, RockShape::Plus, Rock
 struct Chamber {
     rows: Vec<[bool; 7]>,
     jet_index: usize,
-    heights: [usize; 7],
-    num_elided_rows: usize,
 }
 
 impl Chamber {
     fn new() -> Chamber {
-        Chamber { rows: vec![], jet_index: 0, heights: [0; 7], num_elided_rows: 0 }
+        Chamber { rows: vec![], jet_index: 0 }
     }
 
     fn calc_height_after_rounds(&mut self, jet_dirs: &[u8], rounds: usize) -> usize {
+        let mut active_rows_lookup = HashMap::<(usize, usize), (usize, Vec<[bool; 7]>)>::new();
+        let mut heights_before_settling = vec![];
         for rock_index in 0..rounds {
-            self.simulate_single_rock(rock_index, jet_dirs);
+            // Record the height of the tower before this rock settles
+            heights_before_settling.push(self.height());
+            // Calculate the cache key, based on the position with the rock shape and jet direction cycles
+            let cache_key = (rock_index % ROCK_ORDER.len(), self.jet_index % jet_dirs.len());
+
+            // Drop and settle this rock
+            let active_rows = self.simulate_single_rock(rock_index, jet_dirs);
+
+            let cached_rows = active_rows_lookup.insert(cache_key.clone(), (rock_index, active_rows.clone()));
+            if let Some((rock_index_of_first_rock_in_period, prev_active_rows)) = cached_rows {
+                // If the last time we dropped a rock with this shape & starting jet index we
+                // interacted with the same pattern of rows of settled blocks then we've found a loop
+                if prev_active_rows == active_rows {
+                    // Find how much height is added within every repeating period
+                    let height_after_periods_first_rock_settles = heights_before_settling[rock_index_of_first_rock_in_period + 1];
+                    let height_at_first_period_end = self.height();
+                    let height_per_period = height_at_first_period_end - height_after_periods_first_rock_settles;
+
+                    // Find the number of fully complete repeating periods are needed, plus the number
+                    // of rounds needed within the final (incomplete) period
+                    let rounds_after_start_of_periods = rounds - rock_index_of_first_rock_in_period;
+                    let period_duration = rock_index - rock_index_of_first_rock_in_period;
+                    let num_full_periods = rounds_after_start_of_periods / period_duration;
+                    let rounds_in_partial_period = rounds_after_start_of_periods % period_duration;
+
+                    let height_added_by_full_periods = num_full_periods * height_per_period;
+                    // Find the combined height added before the repeating period is encountered plus
+                    // in the final partial period
+                    let height_added_outside_periods = heights_before_settling[rock_index_of_first_rock_in_period + rounds_in_partial_period];
+
+                    return height_added_by_full_periods + height_added_outside_periods;
+                }
+            }
         }
         self.height()
     }
 
-    fn calc_height_via_periodicity_after_rounds(&mut self, jet_dirs: &[u8], rounds: usize) -> usize {
-        let mut rock_index = 0;
-        let mut state_lookup = HashMap::new();
-        let mut height_lookup = vec![];
-        loop {
-            // println!("Dropping rock {} onto tower of height {}: {:?}", rock_index, self.height(), self.heights);
-            let state = (rock_index % ROCK_ORDER.len(), self.jet_index % jet_dirs.len(), self.heights.clone());
-            if let Some(period_start) = state_lookup.insert(state, rock_index) {
-                // Find how much height is added within every repeating period
-                let height_at_first_period_start = height_lookup[period_start];
-                let height_at_first_period_end = self.height();
-                let height_per_period = height_at_first_period_end - height_at_first_period_start;
-
-                // Find the number of fully complete repeating periods are needed, plus the number
-                // of rounds needed within the final (incomplete) period
-                let rounds_after_start_of_periods = rounds - period_start;
-                let period_duration = rock_index - period_start;
-                let num_full_periods = rounds_after_start_of_periods / period_duration;
-                let rounds_in_partial_period = rounds_after_start_of_periods % period_duration;
-
-                let height_added_by_full_periods = num_full_periods * height_per_period;
-                // Find the combined height added before the repeating period is encountered plus
-                // in the final partial period
-                let height_added_outside_periods = height_lookup[period_start + rounds_in_partial_period];
-
-                return height_added_by_full_periods + height_added_outside_periods;
-            }
-
-            height_lookup.push(self.height());
-            let complete_row = self.simulate_single_rock(rock_index, jet_dirs);
-            rock_index += 1;
-
-            // If a row was completed, we can save memory by discarding that row and all beneath it
-            if let Some(complete_row) = complete_row {
-                self.rows.drain(0..=complete_row);
-                self.heights = self.heights.map(|h| h - complete_row);
-                self.num_elided_rows += complete_row + 1;
-            }
-        }
-    }
-
-    // Returns the highest row completed as a result of dropping this rock
-    fn simulate_single_rock(&mut self, rock_index: usize, jet_dirs: &[u8]) -> Option<usize> {
+    fn simulate_single_rock(&mut self, rock_index: usize, jet_dirs: &[u8]) -> Vec<[bool; 7]> {
         let mut coord = self.new_rock_coord();
         let shape = &ROCK_ORDER[rock_index % ROCK_ORDER.len()];
 
@@ -118,7 +108,8 @@ impl Chamber {
             if let Some(new_coord) = maybe_new_coord {
                 coord = new_coord;
             } else {
-                return self.settle(shape, &coord);
+                self.settle(shape, &coord);
+                return self.rows[coord.1..].iter().cloned().collect();
             }
         }
     }
@@ -181,12 +172,10 @@ impl Chamber {
         })
     }
 
-    // Add the shape to the tower, and return the highest row completed as a result
-    fn settle(&mut self, shape: &RockShape, bottom_left: &Coord) -> Option<usize> {
+    fn settle(&mut self, shape: &RockShape, bottom_left: &Coord) {
         let blocks = shape.blocks();
         let width = shape.width();
 
-        let mut complete_row = None;
         for (dy, row) in blocks.iter().rev().enumerate() {
             let y = bottom_left.1 + dy;
             let within_tower = y < self.rows.len();
@@ -197,20 +186,13 @@ impl Chamber {
                 let x = bottom_left.0 + dx;
                 if dx < width && *block {
                     self.rows[y][x] = true;
-                    if self.heights[x] < y {
-                        self.heights[x] = y;
-                    }
                 }
             }
-            if self.rows[y] == [true; 7] {
-                complete_row = Some(y);
-            }
         }
-        complete_row
     }
 
     fn height(&self) -> usize {
-        self.num_elided_rows + self.rows.len()
+        self.rows.len()
     }
 }
 
@@ -245,6 +227,6 @@ fn main() {
     println!("Part 1: {}", height);
 
     let mut chamber = Chamber::new();
-    let height = chamber.calc_height_via_periodicity_after_rounds(jet_dirs, 1000000000000);
+    let height = chamber.calc_height_after_rounds(jet_dirs, 1000000000000);
     println!("Part 2: {height}");
 }
