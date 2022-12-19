@@ -85,6 +85,18 @@ impl State {
             ..*self
         }
     }
+
+    // The number of geodes we'll end up with if we build no further robots
+    fn forecast_geodes(&self) -> usize {
+        self.geode + self.time_remaining * self.geode_robots
+    }
+
+    // An upper bound on the number of geodes we could possibly create from this point. Based on the
+    // (almost certainly false) assumption that we can simply do nothing but build geode robots for
+    // the remaining time
+    fn geodes_upper_bound(&self) -> usize {
+        self.forecast_geodes() + (self.time_remaining * (self.time_remaining - 1)) / 2
+    }
 }
 
 impl Blueprint {
@@ -92,16 +104,18 @@ impl Blueprint {
         let mut queue = VecDeque::new();
         queue.push_back(State::default(time_limit));
 
-        let mut max_geodes = 0;
+        let mut max_geodes_at_end = 0;
         while let Some(state) = queue.pop_front() {
-            if state.geode > max_geodes {
-                max_geodes = state.geode;
-            }
+            max_geodes_at_end = max_geodes_at_end.max(state.forecast_geodes());
             if state.time_remaining == 0 {
                 continue;
             }
 
-            let mut can_build = false;
+            // If the upper bound on the number of geodes we'd end up with is fewer than the max
+            // we've already seen in another branch, we can throw this branch away.
+            if state.geodes_upper_bound() <= max_geodes_at_end {
+                continue;
+            }
 
             // Build an ore robot
             if state.ore_robots > 0 {
@@ -115,7 +129,6 @@ impl Blueprint {
                         let next_state = state.idle_for(mins_required)
                             .build_ore_robot(self.ore_ore);
                         queue.push_back(next_state);
-                        can_build = true;
                     }
                 }
             }
@@ -132,7 +145,6 @@ impl Blueprint {
                         let next_state = state.idle_for(mins_required)
                             .build_clay_robot(self.clay_ore);
                         queue.push_back(next_state);
-                        can_build = true;
                     }
                 }
             }
@@ -154,7 +166,6 @@ impl Blueprint {
                         let next_state = state.idle_for(mins_required)
                             .build_obsidian_robot(self.obsidian_ore, self.obsidian_clay);
                         queue.push_back(next_state);
-                        can_build = true;
                     }
                 }
             }
@@ -173,23 +184,10 @@ impl Blueprint {
                     let next_state = state.idle_for(mins_required)
                         .build_geode_robot(self.geode_ore, self.geode_obsidian);
                     queue.push_back(next_state);
-                    can_build = true;
                 }
             }
-
-            if !can_build {
-                let next_state = State {
-                    ore: state.ore + (state.ore_robots * state.time_remaining),
-                    clay: state.clay + (state.clay_robots * state.time_remaining),
-                    obsidian: state.obsidian + (state.obsidian_robots * state.time_remaining),
-                    geode: state.geode + (state.geode_robots * state.time_remaining),
-                    time_remaining: 0,
-                    ..state
-                };
-                queue.push_back(next_state);
-            }
         }
-        max_geodes
+        max_geodes_at_end
     }
 
     fn quality_level(&self, time_limit: usize) -> usize {
